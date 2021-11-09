@@ -5,6 +5,8 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 # Copyright (c) Megvii, Inc. and its affiliates.
 
+import sys
+from datetime import timedelta
 from loguru import logger
 
 import torch
@@ -13,12 +15,10 @@ import torch.multiprocessing as mp
 
 import yolox.utils.dist as comm
 
-import os
-import subprocess
-import sys
-import time
-
 __all__ = ["launch"]
+
+
+DEFAULT_TIMEOUT = timedelta(minutes=30)
 
 
 def _find_free_port():
@@ -44,6 +44,7 @@ def launch(
     backend="nccl",
     dist_url=None,
     args=(),
+    timeout=DEFAULT_TIMEOUT,
 ):
     """
     Args:
@@ -57,14 +58,31 @@ def launch(
     """
     world_size = num_machines * num_gpus_per_machine
     if world_size > 1:
-        if int(os.environ.get("WORLD_SIZE", "1")) > 1:
-            dist_url = "{}:{}".format(
-                os.environ.get("MASTER_ADDR", None),
-                os.environ.get("MASTER_PORT", "None"),
+        # https://github.com/pytorch/pytorch/pull/14391
+        # TODO prctl in spawned processes
+
+        if dist_url == "auto":
+            assert (
+                num_machines == 1
+            ), "dist_url=auto cannot work with distributed training."
+            port = _find_free_port()
+            dist_url = f"tcp://127.0.0.1:{port}"
+
+        start_method = "spawn"
+        cache = vars(args[1]).get("cache", False)
+
+        # To use numpy memmap for caching image into RAM, we have to use fork method
+        if cache:
+            assert sys.platform != "win32", (
+                "As Windows platform doesn't support fork method, "
+                "do not add --cache in your training command."
             )
-            local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-            _distributed_worker(
-                local_rank,
+            start_method = "fork"
+
+        mp.start_processes(
+            _distributed_worker,
+            nprocs=num_gpus_per_machine,
+            args=(
                 main_func,
                 world_size,
                 num_gpus_per_machine,
@@ -72,93 +90,12 @@ def launch(
                 backend,
                 dist_url,
                 args,
-            )
-            exit()
-        launch_by_subprocess(
-            sys.argv,
-            world_size,
-            num_machines,
-            machine_rank,
-            num_gpus_per_machine,
-            dist_url,
-            args,
+            ),
+            daemon=False,
+            start_method=start_method,
         )
     else:
         main_func(*args)
-
-
-def launch_by_subprocess(
-    raw_argv,
-    world_size,
-    num_machines,
-    machine_rank,
-    num_gpus_per_machine,
-    dist_url,
-    args,
-):
-    assert (
-        world_size > 1
-    ), "subprocess mode doesn't support single GPU, use spawn mode instead"
-    machine_rank = int(os.getenv("RLAUNCH_REPLICA", machine_rank))
-
-    if dist_url is None:
-        master_ip = subprocess.check_output(["hostname", "--fqdn"]).decode("utf-8")
-        master_ip = str(master_ip).strip()
-        dist_url = "tcp://{}".format(master_ip)
-
-        # ------------------------hack for multi-machine training -------------------- #
-        if num_machines > 1:
-            ip_add_file = "./" + args[1].experiment_name + "ip_add.txt"
-            if machine_rank == 0:
-                with open(ip_add_file, "w") as ip_add:
-                    ip_add.write(dist_url)
-            else:
-                while not os.path.exists(ip_add_file):
-                    time.sleep(0.5)
-
-                with open(ip_add_file, "r") as ip_add:
-                    dist_url = ip_add.readline()
-        else:
-            dist_url = "tcp://127.0.0.1"
-
-    port = _find_free_port()
-    # set PyTorch distributed related environmental variables
-    current_env = os.environ.copy()
-    current_env["MASTER_ADDR"] = dist_url
-    current_env["MASTER_PORT"] = str(port)
-    current_env["WORLD_SIZE"] = str(world_size)
-    assert num_gpus_per_machine <= torch.cuda.device_count()
-
-    if "OMP_NUM_THREADS" not in os.environ and num_gpus_per_machine > 1:
-        current_env["OMP_NUM_THREADS"] = str(1)
-        logger.info(
-            "\n*****************************************\n"
-            "Setting OMP_NUM_THREADS environment variable for each process "
-            "to be {} in default, to avoid your system being overloaded, "
-            "please further tune the variable for optimal performance in "
-            "your application as needed. \n"
-            "*****************************************".format(
-                current_env["OMP_NUM_THREADS"]
-            )
-        )
-
-    processes = []
-    for local_rank in range(0, num_gpus_per_machine):
-        # each process's rank
-        dist_rank = machine_rank * num_gpus_per_machine + local_rank
-        current_env["RANK"] = str(dist_rank)
-        current_env["LOCAL_RANK"] = str(local_rank)
-
-        # spawn the processes
-        cmd = ["python3", *raw_argv]
-
-        process = subprocess.Popen(cmd, env=current_env)
-        processes.append(process)
-
-    for process in processes:
-        process.wait()
-        if process.returncode != 0:
-            raise subprocess.CalledProcessError(returncode=process.returncode, cmd=cmd)
 
 
 def _distributed_worker(
@@ -170,6 +107,7 @@ def _distributed_worker(
     backend,
     dist_url,
     args,
+    timeout=DEFAULT_TIMEOUT,
 ):
     assert (
         torch.cuda.is_available()
@@ -182,26 +120,28 @@ def _distributed_worker(
             init_method=dist_url,
             world_size=world_size,
             rank=global_rank,
+            timeout=timeout,
         )
     except Exception:
         logger.error("Process group URL: {}".format(dist_url))
         raise
+
+    # Setup the local process group (which contains ranks within the same machine)
+    assert comm._LOCAL_PROCESS_GROUP is None
+    num_machines = world_size // num_gpus_per_machine
+    for i in range(num_machines):
+        ranks_on_i = list(
+            range(i * num_gpus_per_machine, (i + 1) * num_gpus_per_machine)
+        )
+        pg = dist.new_group(ranks_on_i)
+        if i == machine_rank:
+            comm._LOCAL_PROCESS_GROUP = pg
+
     # synchronize is needed here to prevent a possible timeout after calling init_process_group
     # See: https://github.com/facebookresearch/maskrcnn-benchmark/issues/172
     comm.synchronize()
 
     assert num_gpus_per_machine <= torch.cuda.device_count()
     torch.cuda.set_device(local_rank)
-
-    args[1].local_rank = local_rank
-
-    # Setup the local process group (which contains ranks within the same machine)
-    # assert comm._LOCAL_PROCESS_GROUP is None
-    # num_machines = world_size // num_gpus_per_machine
-    # for i in range(num_machines):
-    # ranks_on_i = list(range(i * num_gpus_per_machine, (i + 1) * num_gpus_per_machine))
-    # pg = dist.new_group(ranks_on_i)
-    # if i == machine_rank:
-    # comm._LOCAL_PROCESS_GROUP = pg
 
     main_func(*args)
