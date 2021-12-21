@@ -14,7 +14,7 @@ import torch
 from yolox.data.data_augment import ValTransform
 from yolox.data.datasets import COCO_CLASSES
 from yolox.exp import get_exp
-from yolox.utils import fuse_model, get_model_info, postprocess, vis
+from yolox.utils import fuse_model, get_model_info, postprocess, vis, vis_erase
 
 IMAGE_EXT = [".jpg", ".jpeg", ".webp", ".bmp", ".png"]
 
@@ -179,8 +179,8 @@ class Predictor(object):
 
         cls = output[:, 6]
         scores = output[:, 4] * output[:, 5]
-
-        vis_res = vis(img, bboxes, scores, cls, cls_conf, self.cls_names)
+        vis_res = vis_erase(img, bboxes, scores, cls, cls_conf, self.cls_names)
+        # vis_res = vis(img, bboxes, scores, cls, cls_conf, self.cls_names)
         return vis_res
 
 
@@ -194,11 +194,11 @@ def image_demo(predictor, vis_folder, path, current_time, save_result):
         outputs, img_info = predictor.inference(image_name)
         result_image = predictor.visual(outputs[0], img_info, predictor.confthre)
         if save_result:
-            save_folder = os.path.join(
-                vis_folder, time.strftime("%Y_%m_%d_%H_%M_%S", current_time)
-            )
-            os.makedirs(save_folder, exist_ok=True)
-            save_file_name = os.path.join(save_folder, os.path.basename(image_name))
+            # save_folder = os.path.join(
+            #     vis_folder, time.strftime("%Y_%m_%d_%H_%M_%S", current_time)
+            # )
+            os.makedirs(vis_folder, exist_ok=True)
+            save_file_name = os.path.join(vis_folder, os.path.basename(image_name))
             logger.info("Saving detection result in {}".format(save_file_name))
             cv2.imwrite(save_file_name, result_image)
         # ch = cv2.waitKey(1)
@@ -304,6 +304,7 @@ def main(exp, args):
     )
     current_time = time.localtime()
     if args.demo == "image":
+        vis_folder = "/home/deepmirror/work/99.temp/yolovx_cache"
         image_demo(predictor, vis_folder, args.path, current_time, args.save_result)
     elif args.demo == "video" or args.demo == "webcam":
         imageflow_demo(predictor, vis_folder, current_time, args)
