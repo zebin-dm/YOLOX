@@ -30,6 +30,10 @@ def make_parser():
     parser.add_argument(
         "--path", default="./assets/dog.jpg", help="path to images or video"
     )
+
+    parser.add_argument(
+        "--vis_folder_path", default="", help="path to save"
+    )
     parser.add_argument("--camid", type=int, default=0, help="webcam demo camera id")
     parser.add_argument(
         "--save_result",
@@ -304,8 +308,10 @@ def main(exp, args):
     )
     current_time = time.localtime()
     if args.demo == "image":
-        vis_folder = "/home/deepmirror/work/99.temp/yolovx_cache"
-        image_demo(predictor, vis_folder, args.path, current_time, args.save_result)
+
+        # vis_folder = "/home/deepmirror/work/99.temp/yolovx_cache"
+        # image_demo(predictor, vis_folder, args.path, current_time, args.save_result)
+        image_demo(predictor, args.vis_folder_path, args.path, current_time, args.save_result)
     elif args.demo == "video" or args.demo == "webcam":
         imageflow_demo(predictor, vis_folder, current_time, args)
 
