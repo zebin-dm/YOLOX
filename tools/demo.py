@@ -158,7 +158,7 @@ class Predictor(object):
                 img = img.half()  # to FP16
 
         with torch.no_grad():
-            t0 = time.time()
+            # t0 = time.time()
             outputs = self.model(img)
             if self.decoder is not None:
                 outputs = self.decoder(outputs, dtype=outputs.type())
@@ -166,7 +166,7 @@ class Predictor(object):
                 outputs, self.num_classes, self.confthre,
                 self.nmsthre, class_agnostic=True
             )
-            logger.info("Infer time: {:.4f}s".format(time.time() - t0))
+            # logger.info("Infer time: {:.4f}s".format(time.time() - t0))
         return outputs, img_info
 
     def visual(self, output, img_info, cls_conf=0.35):
@@ -194,17 +194,24 @@ def image_demo(predictor, vis_folder, path, current_time, save_result):
     else:
         files = [path]
     files.sort()
-    for image_name in files:
+
+    for idx, image_name in enumerate(files):
         outputs, img_info = predictor.inference(image_name)
         result_image = predictor.visual(outputs[0], img_info, predictor.confthre)
-        if save_result:
+        save_file_name = os.path.join(vis_folder, os.path.basename(image_name))
+        cv2.imwrite(save_file_name, result_image)
+
+        if idx % 2000 == 0:
+            print(idx)
+        # if save_result:
             # save_folder = os.path.join(
             #     vis_folder, time.strftime("%Y_%m_%d_%H_%M_%S", current_time)
             # )
-            os.makedirs(vis_folder, exist_ok=True)
-            save_file_name = os.path.join(vis_folder, os.path.basename(image_name))
-            logger.info("Saving detection result in {}".format(save_file_name))
-            cv2.imwrite(save_file_name, result_image)
+            # os.makedirs(vis_folder, exist_ok=True)
+        # save_file_name = os.path.join(vis_folder, os.path.basename(image_name))
+        #     # logger.info("Saving detection result in {}".format(save_file_name))
+        # cv2.imwrite(save_file_name, result_image)
+
         # ch = cv2.waitKey(1)
         # if ch == 27 or ch == ord("q") or ch == ord("Q"):
         #     break
@@ -311,6 +318,7 @@ def main(exp, args):
 
         # vis_folder = "/home/deepmirror/work/99.temp/yolovx_cache"
         # image_demo(predictor, vis_folder, args.path, current_time, args.save_result)
+        os.makedirs(args.vis_folder_path, exist_ok=True)
         image_demo(predictor, args.vis_folder_path, args.path, current_time, args.save_result)
     elif args.demo == "video" or args.demo == "webcam":
         imageflow_demo(predictor, vis_folder, current_time, args)
