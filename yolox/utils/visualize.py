@@ -41,12 +41,78 @@ def vis(img, boxes, scores, cls_ids, conf=0.5, class_names=None):
 
     return img
 
+erase_names = COCO_CLASSES = [
+    "person",
+    "bicycle",
+    "car",
+    "motorcycle",
+    "airplane",
+    "bus",
+    "train",
+    "truck",
+    "boat",
+    "bird",
+    "cat",
+    "dog",
+    "horse",
+    "sheep",
+    "cow",
+    "elephant",
+    "bear",
+    "zebra",
+    "giraffe",
+    "backpack",
+    "umbrella",
+    "handbag",
+    "tie",
+    "suitcase",
+    "kite",
+    "baseball bat",
+    "baseball glove",
+    "skateboard",
+    "surfboard",
+    "tennis racket",
+    "bottle",
+    "wine glass",
+    "cup",
+    "fork",
+    "knife",
+    "spoon",
+    "bowl",
+    "banana",
+    "apple",
+    "sandwich",
+    "orange",
+    "broccoli",
+    "carrot",
+    "hot dog",
+    "pizza",
+    "donut",
+    "cake",
+    "potted plant",
+    "laptop",
+    "mouse",
+    "remote",
+    "keyboard",
+    "cell phone",
+    "sink",
+    "book",
+    "scissors",
+    "teddy bear",
+    "hair drier",
+    "toothbrush",]
+
 
 def vis_erase(img, boxes, scores, cls_ids, conf=0.5, class_names=None):
 
     for i in range(len(boxes)):
-        box = boxes[i]
+
         cls_id = int(cls_ids[i])
+        c_name = class_names[cls_id]
+        if c_name in erase_names:
+            continue
+
+        box = boxes[i]
         score = scores[i]
         if score < conf:
             continue
