@@ -109,7 +109,7 @@ def vis_erase(img, boxes, scores, cls_ids, conf=0.5, class_names=None):
 
         cls_id = int(cls_ids[i])
         c_name = class_names[cls_id]
-        if c_name in erase_names:
+        if c_name not in erase_names:
             continue
 
         box = boxes[i]
@@ -138,7 +138,9 @@ def vis_erase(img, boxes, scores, cls_ids, conf=0.5, class_names=None):
         #     -1
         # )
         # cv2.putText(img, text, (x0, y0 + txt_size[1]), font, 0.4, txt_color, thickness=1)
-        img[y0: y1, x0: x1, :] = [128, 128, 128]
+
+        color = [np.random.randint(0, 255), np.random.randint(0, 255), np.random.randint(0, 255)]
+        img[y0: y1, x0: x1, :] = color
 
     return img
 
